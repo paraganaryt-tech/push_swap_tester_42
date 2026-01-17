@@ -2074,13 +2074,10 @@ int main(int argc, char** argv) {
     }
     
     // Check if checker binary exists and is executable (if specified)
-    bool checker_valid = false;
     if (!cfg.checker.empty()) {
         if (access(cfg.checker.c_str(), X_OK) != 0) {
             cerr << YEL << "⚠ Warning: checker binary not found or not executable: " << cfg.checker << "\n" << RST;
             cerr << YEL << "  Checker tests will run but expect failures.\n" << RST;
-        } else {
-            checker_valid = true;
         }
     }
     
