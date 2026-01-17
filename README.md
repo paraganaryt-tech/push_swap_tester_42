@@ -1,6 +1,13 @@
-# 🏆 PS_TESTER v4.0 - The Ultimate Push_swap Tester
+# 🏆 PS_TESTER v5.0 - The Ultimate Push_swap Tester
 
 **The most comprehensive tester for 42/1337 push_swap project - if your push_swap passes this, it's 100% bulletproof for evaluations!**
+
+## ✨ What's New in v5.0
+
+- 🔍 **Separate Checker Statistics** - Clear distinction between push_swap and checker results
+- 💀 **Crash Detection** - Detects segfaults/crashes in both push_swap AND checker
+- ☠️ **Memory Leak Detection for Checker** - Valgrind testing for checker program too!
+- 📊 **Improved Final Results** - Beautiful tree-style output with emojis
 
 ## 📋 Requirements
 
@@ -57,10 +64,47 @@ make help     # Show all commands
 | **Already Sorted** | 13+ | Empty to 77 elements, must be 0 ops |
 | **Big Number Ranges** | 18+ | INT_MIN area, various 500-number ranges |
 | **Checker Invalid Ops** | 24+ | All uppercase, extra chars, spaces, etc. |
+| **Checker Memory Leaks** | 8+ | Valgrind testing for checker program |
+| **Checker Crash Tests** | 35+ | Segfault/crash detection for checker |
 | **Memory Leak Tests** | 20+ | All error cases, overflow scenarios |
 | **Performance** | 100+ | Size 3, 5, 10, 50, 100, 500 benchmarks |
 
-**TOTAL: 400+ unique test cases!**
+**TOTAL: 450+ unique test cases!**
+
+## 📈 Final Results Display
+
+The tester now shows **separate statistics** for push_swap and checker:
+
+```
+╔══════════════════════════════════════════════════════════════════╗
+║ FINAL RESULTS                                                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  📊 PUSH_SWAP:
+  ├─ Total Tests:    150
+  ├─ Passed:         150
+  ├─ Failed:         0
+  ├─ Memory Leaks:   0
+  └─ Crashes:        0
+     Success Rate:   100.0%
+
+  🔍 CHECKER (Bonus):
+  ├─ Total Tests:    43
+  ├─ Passed:         43
+  ├─ Failed:         0
+  ├─ Memory Leaks:   0
+  └─ Crashes:        0
+     Success Rate:   100.0%
+```
+
+### Detection Indicators
+
+| Status | Meaning |
+|--------|---------|
+| ✓ PASS | Test passed |
+| ✗ FAIL | Test failed (wrong output) |
+| ☠ LEAK | Memory leak detected |
+| 💀 SEGV | Crash/Segfault detected |
 
 ## 🎯 Edge Cases Tested
 

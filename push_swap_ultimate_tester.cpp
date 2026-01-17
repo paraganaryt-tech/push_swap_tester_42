@@ -129,7 +129,17 @@ struct Stats {
     map<string, vector<int>> perf_results;
 };
 
+struct CheckerStats {
+    int total = 0;
+    int passed = 0;
+    int failed = 0;
+    int leaks = 0;
+    int crashes = 0;
+    vector<string> failed_tests;
+};
+
 Stats stats;
+CheckerStats checker_stats;
 mutex stats_mutex;
 
 // ==================================================================================
@@ -491,10 +501,17 @@ ExecResult run_push_swap(const vector<string>& args, bool with_valgrind = false)
     return execute_command(cmd, "", with_valgrind);
 }
 
-ExecResult run_checker(const vector<string>& args, const string& instructions) {
-    vector<string> cmd = {cfg.checker};
+ExecResult run_checker(const vector<string>& args, const string& instructions, bool with_valgrind = false) {
+    vector<string> cmd;
+    if (with_valgrind && cfg.use_valgrind) {
+        cmd = {"valgrind", "--leak-check=full", "--show-leak-kinds=all", 
+               "--errors-for-leak-kinds=all", "--error-exitcode=42", 
+               cfg.checker};
+    } else {
+        cmd = {cfg.checker};
+    }
     cmd.insert(cmd.end(), args.begin(), args.end());
-    return execute_command(cmd, instructions);
+    return execute_command(cmd, instructions, with_valgrind);
 }
 
 // ==================================================================================
@@ -1610,16 +1627,27 @@ void run_checker_tests() {
         
         ExecResult r = run_checker(args, instructions);
         
+        // Check for crash first
+        if (r.signal_num != 0) {
+            checker_stats.total++;
+            checker_stats.failed++;
+            checker_stats.crashes++;
+            checker_stats.failed_tests.push_back(name + " (crash)");
+            print_result(name, SEGV, expect_ok ? "(expect OK)" : "(expect KO)");
+            return;
+        }
+        
         bool got_ok = (r.stdout_data.find("OK") != string::npos);
         bool got_ko = (r.stdout_data.find("KO") != string::npos);
         
         bool passed = (expect_ok && got_ok) || (!expect_ok && got_ko);
         string status = passed ? PASS : FAIL;
         
-        stats.total++;
-        if (passed) stats.passed++;
+        checker_stats.total++;
+        if (passed) checker_stats.passed++;
         else {
-            stats.failed++;
+            checker_stats.failed++;
+            checker_stats.failed_tests.push_back(name);
             string reason = expect_ok ? "Expected OK but got KO or no response" : "Expected KO but got OK or no response";
             log_error(name, "Checker Test", reason, args);
         }
@@ -1650,13 +1678,26 @@ void run_checker_tests() {
         
         ExecResult r = run_checker(args, instructions);
         
+        // Check for crash first
+        if (r.signal_num != 0) {
+            checker_stats.total++;
+            checker_stats.failed++;
+            checker_stats.crashes++;
+            checker_stats.failed_tests.push_back(name + " (crash)");
+            print_result(name, SEGV);
+            return;
+        }
+        
         bool has_error = (r.stderr_data.find("Error") != string::npos || 
                          r.stdout_data.find("Error") != string::npos);
         
         string status = has_error ? PASS : FAIL;
-        stats.total++;
-        if (has_error) stats.passed++;
-        else stats.failed++;
+        checker_stats.total++;
+        if (has_error) checker_stats.passed++;
+        else {
+            checker_stats.failed++;
+            checker_stats.failed_tests.push_back(name);
+        }
         
         print_result(name, status);
     };
@@ -1690,11 +1731,25 @@ void run_checker_tests() {
     
     auto test_checker_parse_error = [](const string& name, const vector<string>& args) {
         ExecResult r = execute_command({cfg.checker, args[0]});
+        
+        // Check for crash first
+        if (r.signal_num != 0) {
+            checker_stats.total++;
+            checker_stats.failed++;
+            checker_stats.crashes++;
+            checker_stats.failed_tests.push_back(name + " (crash)");
+            print_result(name, SEGV);
+            return;
+        }
+        
         bool has_error = (r.stderr_data.find("Error") != string::npos);
         string status = has_error ? PASS : FAIL;
-        stats.total++;
-        if (has_error) stats.passed++;
-        else stats.failed++;
+        checker_stats.total++;
+        if (has_error) checker_stats.passed++;
+        else {
+            checker_stats.failed++;
+            checker_stats.failed_tests.push_back(name);
+        }
         print_result(name, status);
     };
     
@@ -1703,6 +1758,89 @@ void run_checker_tests() {
     test_checker_parse_error("Overflow", {"99999999999"});
     test_checker_parse_error("Sign in middle '111-1 2 -3'", {"111-1 2 -3"});
     test_checker_parse_error("Double minus '--5'", {"--5"});
+    
+    // Memory leak tests for checker
+    if (cfg.use_valgrind) {
+        print_subheader("Checker Memory Leak Tests");
+        
+        auto test_checker_leaks = [](const string& name, const vector<int>& nums, 
+                                     const string& instructions) {
+            vector<string> args;
+            for (int n : nums) args.push_back(to_string(n));
+            
+            ExecResult r = run_checker(args, instructions, true);
+            
+            bool has_leak = r.has_leaks || r.leaked_bytes > 0;
+            bool crashed = (r.signal_num != 0);
+            
+            string status;
+            if (crashed) {
+                status = SEGV;
+                checker_stats.crashes++;
+                checker_stats.failed++;
+                checker_stats.failed_tests.push_back(name + " (crash)");
+            } else if (has_leak) {
+                status = LEAK;
+                checker_stats.leaks++;
+                checker_stats.failed++;
+                checker_stats.failed_tests.push_back(name + " (leak)");
+            } else {
+                status = PASS;
+                checker_stats.passed++;
+            }
+            checker_stats.total++;
+            
+            string details = "";
+            if (has_leak) details = to_string(r.leaked_bytes) + " bytes leaked";
+            print_result(name, status, details);
+        };
+        
+        // Test valid cases
+        test_checker_leaks("Leak: sorted no ops", {1, 2, 3}, "");
+        test_checker_leaks("Leak: simple swap", {2, 1}, "sa\n");
+        test_checker_leaks("Leak: multiple ops", {3, 2, 1}, "ra\nsa\n");
+        test_checker_leaks("Leak: all operations", {5, 4, 3, 2, 1}, "pb\npb\nra\nrb\nrr\nrra\nrrb\nrrr\nsa\nsb\nss\npa\npa\n");
+        test_checker_leaks("Leak: 100 elements", generate_unique_random(100, 1, 1000), "");
+        
+        // Test error cases (should still not leak)
+        auto test_checker_error_leaks = [](const string& name, const vector<string>& args) {
+            vector<string> cmd;
+            cmd = {"valgrind", "--leak-check=full", "--show-leak-kinds=all", 
+                   "--errors-for-leak-kinds=all", "--error-exitcode=42", 
+                   cfg.checker};
+            cmd.insert(cmd.end(), args.begin(), args.end());
+            
+            ExecResult r = execute_command(cmd, "", true);
+            
+            bool has_leak = r.has_leaks || r.leaked_bytes > 0;
+            bool crashed = (r.signal_num != 0);
+            
+            string status;
+            if (crashed) {
+                status = SEGV;
+                checker_stats.crashes++;
+                checker_stats.failed++;
+                checker_stats.failed_tests.push_back(name + " (crash)");
+            } else if (has_leak) {
+                status = LEAK;
+                checker_stats.leaks++;
+                checker_stats.failed++;
+                checker_stats.failed_tests.push_back(name + " (leak)");
+            } else {
+                status = PASS;
+                checker_stats.passed++;
+            }
+            checker_stats.total++;
+            
+            string details = "";
+            if (has_leak) details = to_string(r.leaked_bytes) + " bytes leaked";
+            print_result(name, status, details);
+        };
+        
+        test_checker_error_leaks("Leak: invalid arg", {"abc"});
+        test_checker_error_leaks("Leak: duplicate", {"1", "1"});
+        test_checker_error_leaks("Leak: overflow", {"99999999999"});
+    }
 }
 
 void run_stress_tests() {
@@ -1929,6 +2067,23 @@ int main(int argc, char** argv) {
     cfg.push_swap = positional[0];
     if (positional.size() > 1) cfg.checker = positional[1];
     
+    // Check if push_swap binary exists and is executable
+    if (access(cfg.push_swap.c_str(), X_OK) != 0) {
+        cerr << RED << "Error: push_swap binary not found or not executable: " << cfg.push_swap << "\n" << RST;
+        return 1;
+    }
+    
+    // Check if checker binary exists and is executable (if specified)
+    bool checker_valid = false;
+    if (!cfg.checker.empty()) {
+        if (access(cfg.checker.c_str(), X_OK) != 0) {
+            cerr << YEL << "⚠ Warning: checker binary not found or not executable: " << cfg.checker << "\n" << RST;
+            cerr << YEL << "  Checker tests will run but expect failures.\n" << RST;
+        } else {
+            checker_valid = true;
+        }
+    }
+    
     // Check if valgrind is available
     if (cfg.use_valgrind) {
         ExecResult vg = execute_command({"valgrind", "--version"});
@@ -1969,32 +2124,60 @@ int main(int argc, char** argv) {
     // Final Summary
     print_header("FINAL RESULTS");
     
-    cout << "\n";
-    cout << "  Total Tests:    " << BLD << stats.total << RST << "\n";
-    cout << "  Passed:         " << GRN << BLD << stats.passed << RST << "\n";
-    cout << "  Failed:         " << RED << BLD << stats.failed << RST << "\n";
-    cout << "  Memory Leaks:   " << (stats.leaks > 0 ? RED : GRN) << BLD << stats.leaks << RST << "\n";
-    cout << "  Crashes:        " << (stats.crashes > 0 ? RED : GRN) << BLD << stats.crashes << RST << "\n";
-    cout << "  Timeouts:       " << (stats.timeouts > 0 ? YEL : GRN) << BLD << stats.timeouts << RST << "\n";
-    cout << "\n";
-    cout << "  Time Elapsed:   " << fixed << setprecision(2) << elapsed << "s\n";
-    cout << "  Success Rate:   ";
-    
-    double rate = (stats.total > 0) ? (100.0 * stats.passed / stats.total) : 0;
-    if (rate >= 95) cout << GRN;
-    else if (rate >= 80) cout << YEL;
-    else cout << RED;
-    cout << BLD << fixed << setprecision(1) << rate << "%" << RST << "\n";
-    
-    if (!stats.failed_tests.empty() && stats.failed_tests.size() <= 10) {
-        cout << "\n  " << RED << "Failed tests:" << RST << "\n";
-        for (const auto& t : stats.failed_tests) {
-            cout << "    - " << t << "\n";
+    // Push_swap results
+    if (!cfg.checker_only) {
+        cout << "\n  " << BLD << CYN << "📊 PUSH_SWAP:" << RST << "\n";
+        cout << "  ├─ Total Tests:    " << BLD << stats.total << RST << "\n";
+        cout << "  ├─ Passed:         " << GRN << BLD << stats.passed << RST << "\n";
+        cout << "  ├─ Failed:         " << (stats.failed > 0 ? RED : GRN) << BLD << stats.failed << RST << "\n";
+        cout << "  ├─ Memory Leaks:   " << (stats.leaks > 0 ? RED : GRN) << BLD << stats.leaks << RST << "\n";
+        cout << "  ├─ Crashes:        " << (stats.crashes > 0 ? RED : GRN) << BLD << stats.crashes << RST << "\n";
+        cout << "  └─ Timeouts:       " << (stats.timeouts > 0 ? YEL : GRN) << BLD << stats.timeouts << RST << "\n";
+        
+        double ps_rate = (stats.total > 0) ? (100.0 * stats.passed / stats.total) : 0;
+        cout << "     Success Rate:   ";
+        if (ps_rate >= 95) cout << GRN;
+        else if (ps_rate >= 80) cout << YEL;
+        else cout << RED;
+        cout << BLD << fixed << setprecision(1) << ps_rate << "%" << RST << "\n";
+        
+        if (!stats.failed_tests.empty() && stats.failed_tests.size() <= 10) {
+            cout << "\n     " << RED << "Failed tests:" << RST << "\n";
+            for (const auto& t : stats.failed_tests) {
+                cout << "       - " << t << "\n";
+            }
         }
     }
     
+    // Checker results
+    if (!cfg.checker.empty()) {
+        cout << "\n  " << BLD << MAG << "🔍 CHECKER (Bonus):" << RST << "\n";
+        cout << "  ├─ Total Tests:    " << BLD << checker_stats.total << RST << "\n";
+        cout << "  ├─ Passed:         " << GRN << BLD << checker_stats.passed << RST << "\n";
+        cout << "  ├─ Failed:         " << (checker_stats.failed > 0 ? RED : GRN) << BLD << checker_stats.failed << RST << "\n";
+        cout << "  ├─ Memory Leaks:   " << (checker_stats.leaks > 0 ? RED : GRN) << BLD << checker_stats.leaks << RST << "\n";
+        cout << "  └─ Crashes:        " << (checker_stats.crashes > 0 ? RED : GRN) << BLD << checker_stats.crashes << RST << "\n";
+        
+        double chk_rate = (checker_stats.total > 0) ? (100.0 * checker_stats.passed / checker_stats.total) : 0;
+        cout << "     Success Rate:   ";
+        if (chk_rate >= 95) cout << GRN;
+        else if (chk_rate >= 80) cout << YEL;
+        else cout << RED;
+        cout << BLD << fixed << setprecision(1) << chk_rate << "%" << RST << "\n";
+        
+        if (!checker_stats.failed_tests.empty() && checker_stats.failed_tests.size() <= 10) {
+            cout << "\n     " << RED << "Failed tests:" << RST << "\n";
+            for (const auto& t : checker_stats.failed_tests) {
+                cout << "       - " << t << "\n";
+            }
+        }
+    }
+    
+    cout << "\n";
+    cout << "  ⏱️  Time Elapsed:   " << fixed << setprecision(2) << elapsed << "s\n";
+    
     cout << "\n" << GRY << "Trace log: " << cfg.trace_file << RST << "\n";
-    if (stats.failed > 0) {
+    if (stats.failed > 0 || checker_stats.failed > 0) {
         cout << GRY << "Errors log: " << cfg.errors_file << RST << "\n";
     }
     
@@ -2002,9 +2185,17 @@ int main(int argc, char** argv) {
         generate_html_report();
     }
     
-    cout << "\n" << BLD << (stats.failed == 0 && stats.leaks == 0 && stats.crashes == 0 ? 
-                           GRN "🎉 ALL TESTS PASSED! Your push_swap is ready for evaluation!" : 
-                           RED "⚠ Some tests failed. Check errors.txt for details.") << RST << "\n\n";
+    // Final message
+    bool all_passed = (stats.failed == 0 && stats.leaks == 0 && stats.crashes == 0);
+    bool checker_passed = cfg.checker.empty() || (checker_stats.failed == 0 && checker_stats.leaks == 0 && checker_stats.crashes == 0);
+    
+    if (all_passed && checker_passed) {
+        cout << "\n" << BLD << GRN << "🎉 ALL TESTS PASSED! Your push_swap is ready for evaluation!" << RST << "\n\n";
+    } else if (all_passed && !checker_passed) {
+        cout << "\n" << BLD << YEL << "✓ Push_swap tests passed! Checker (bonus) has some failures." << RST << "\n\n";
+    } else {
+        cout << "\n" << BLD << RED << "⚠ Some tests failed. Check errors.txt for details." << RST << "\n\n";
+    }
     
     return (stats.failed > 0 || stats.crashes > 0) ? 1 : 0;
 }
