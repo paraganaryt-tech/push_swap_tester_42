@@ -1881,6 +1881,20 @@ void run_checker_tests() {
         test_checker_error_leaks("Leak: empty string", {""});
         test_checker_error_leaks("Leak: INT_MAX+1", {"2147483648"});
         test_checker_error_leaks("Leak: INT_MIN-1", {"-2147483649"});
+        
+        // === QUOTED STRING ERRORS (single arg with spaces - split leak test) ===
+        // These are the CRITICAL tests - when checker receives ONE argument with spaces
+        // and has to split it, it may leak the split array on error!
+        test_checker_error_leaks("Quoted: overflow in middle", {"1 2 3 4 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 8 7 6"});
+        test_checker_error_leaks("Quoted: dup at end", {"1 2 3 4 5 1"});
+        test_checker_error_leaks("Quoted: letter in middle", {"1 2 3 abc 4 5"});
+        test_checker_error_leaks("Quoted: double sign", {"1 2 3 --5 4"});
+        test_checker_error_leaks("Quoted: sign in middle of num", {"1 2 3-3 4"});
+        test_checker_error_leaks("Quoted: leading zero dup", {"1 2 3 4 5 01"});
+        test_checker_error_leaks("Quoted: INT_MAX+1 at end", {"1 2 3 4 2147483648"});
+        test_checker_error_leaks("Quoted: huge overflow", {"1 2 3 99999999999999999999999999999999999999999999999999999999"});
+        test_checker_error_leaks("Quoted: many valid then dup", {"1 2 3 4 5 6 7 8 9 10 1"});
+        test_checker_error_leaks("Quoted: 20 nums then overflow", {"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 99999999999999999999"});
     }
 }
 
