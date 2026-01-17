@@ -1840,6 +1840,13 @@ void run_checker_tests() {
         test_checker_error_leaks("Leak: invalid arg", {"abc"});
         test_checker_error_leaks("Leak: duplicate", {"1", "1"});
         test_checker_error_leaks("Leak: overflow", {"99999999999"});
+        
+        // Overflow in middle of valid args (common leak case!)
+        test_checker_error_leaks("Leak: 1 2 3 HUGE 5", {"1", "2", "3", "99999999999999999999", "5"});
+        test_checker_error_leaks("Leak: valid then overflow", {"1", "2", "3", "99999999999999999999"});
+        test_checker_error_leaks("Leak: overflow at end", {"42", "41", "40", "99999999999999999999999999"});
+        test_checker_error_leaks("Leak: 50 digit number", {"555555555555555555555555555555555555555555555555"});
+        test_checker_error_leaks("Leak: negative overflow", {"-1", "-2", "-99999999999999999999"});
     }
 }
 
