@@ -1,0 +1,24 @@
+# Binary
+ps_tester
+
+# Log files
+trace.log
+errors.txt
+report.html
+output*.txt
+full_output.txt
+
+# Object files
+*.o
+*.out
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
