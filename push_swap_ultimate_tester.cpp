@@ -1837,16 +1837,50 @@ void run_checker_tests() {
             print_result(name, status, details);
         };
         
-        test_checker_error_leaks("Leak: invalid arg", {"abc"});
-        test_checker_error_leaks("Leak: duplicate", {"1", "1"});
-        test_checker_error_leaks("Leak: overflow", {"99999999999"});
+        // === OVERFLOW IN MIDDLE OF VALID LIST (CRITICAL!) ===
+        test_checker_error_leaks("Leak: 1 2 3 4 HUGE 8 7 6", {"1", "2", "3", "4", "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999", "8", "7", "6"});
+        test_checker_error_leaks("Leak: 1 2 3 HUGE (at end)", {"1", "2", "3", "99999999999999999999999999999999999999999999999999"});
+        test_checker_error_leaks("Leak: 1 HUGE 2 3 (early)", {"1", "9999999999999999999999999999999999999999999999999999999999999999", "2", "3"});
+        test_checker_error_leaks("Leak: Valid 10 then overflow", {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "99999999999999999999"});
+        test_checker_error_leaks("Leak: INT_MAX+1 after valid", {"42", "21", "2147483648"});
+        test_checker_error_leaks("Leak: INT_MIN-1 after valid", {"42", "21", "-2147483649"});
+        test_checker_error_leaks("Leak: -INT overflow after valid", {"1", "2", "3", "-99999999999999999999999999999999999999999999"});
         
-        // Overflow in middle of valid args (common leak case!)
-        test_checker_error_leaks("Leak: 1 2 3 HUGE 5", {"1", "2", "3", "99999999999999999999", "5"});
-        test_checker_error_leaks("Leak: valid then overflow", {"1", "2", "3", "99999999999999999999"});
-        test_checker_error_leaks("Leak: overflow at end", {"42", "41", "40", "99999999999999999999999999"});
-        test_checker_error_leaks("Leak: 50 digit number", {"555555555555555555555555555555555555555555555555"});
-        test_checker_error_leaks("Leak: negative overflow", {"-1", "-2", "-99999999999999999999"});
+        // === INVALID CHAR AFTER VALID NUMBERS ===
+        test_checker_error_leaks("Leak: 1 2 3 4 abc 8 7 6", {"1", "2", "3", "4", "abc", "8", "7", "6"});
+        test_checker_error_leaks("Leak: Letter after 10 valid", {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "x"});
+        test_checker_error_leaks("Leak: Special char '@'", {"42", "21", "10", "@"});
+        test_checker_error_leaks("Leak: Decimal '1.5'", {"42", "21", "1.5"});
+        test_checker_error_leaks("Leak: Mixed 'a1'", {"1", "2", "3", "a1"});
+        test_checker_error_leaks("Leak: Mixed '1a'", {"1", "2", "3", "1a"});
+        
+        // === DUPLICATE AFTER ALLOCATION ===
+        test_checker_error_leaks("Leak: Dup at end '1 2 3 4 5 1'", {"1", "2", "3", "4", "5", "1"});
+        test_checker_error_leaks("Leak: Dup at end long list", {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "1"});
+        test_checker_error_leaks("Leak: Dup leading zero '01'", {"1", "2", "3", "4", "5", "01"});
+        test_checker_error_leaks("Leak: Dup with plus '+1'", {"1", "2", "3", "4", "5", "+1"});
+        test_checker_error_leaks("Leak: Dup zeros '0 00'", {"1", "2", "0", "00"});
+        test_checker_error_leaks("Leak: Dup -0", {"1", "2", "0", "-0"});
+        test_checker_error_leaks("Leak: Hidden dup '00042'", {"42", "21", "10", "00042"});
+        
+        // === SIGN ERRORS AFTER ALLOCATION ===
+        test_checker_error_leaks("Leak: Sign middle '4-4'", {"1", "2", "3", "4-4"});
+        test_checker_error_leaks("Leak: Sign middle '3+3'", {"1", "2", "3", "3+3"});
+        test_checker_error_leaks("Leak: Double sign '--5'", {"1", "2", "--5"});
+        test_checker_error_leaks("Leak: Double sign '++5'", {"1", "2", "++5"});
+        test_checker_error_leaks("Leak: Plus minus '+-5'", {"1", "2", "+-5"});
+        test_checker_error_leaks("Leak: Trailing '5-'", {"1", "2", "5-"});
+        test_checker_error_leaks("Leak: Only sign '+'", {"1", "2", "3", "+"});
+        test_checker_error_leaks("Leak: Only sign '-'", {"1", "2", "3", "-"});
+        
+        // === BASIC ERROR CASES ===
+        test_checker_error_leaks("Leak: invalid arg 'abc'", {"abc"});
+        test_checker_error_leaks("Leak: duplicate '1 2 1'", {"1", "2", "1"});
+        test_checker_error_leaks("Leak: overflow simple", {"9999999999999999"});
+        test_checker_error_leaks("Leak: 50+ digit number", {"99999999999999999999999999999999999999999999999999"});
+        test_checker_error_leaks("Leak: empty string", {""});
+        test_checker_error_leaks("Leak: INT_MAX+1", {"2147483648"});
+        test_checker_error_leaks("Leak: INT_MIN-1", {"-2147483649"});
     }
 }
 
